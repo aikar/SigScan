@@ -1,79 +1,278 @@
-<!DOCTYPE html>
 <html>
+	<head>
+		<title>SigScan - Documentation</title>
+		<style>
+			body
+			{
+				background: #333333;
+				color: #cccccc;
+				padding: 20px;
+			}
 
-  <head>
-    <meta charset='utf-8' />
-    <meta http-equiv="X-UA-Compatible" content="chrome=1" />
-    <meta name="description" content="SigScan : Old project used for Final Fantasy XI Windower project. Allows you to use byte signatures to dynamically locate memory addresses during program runtime.                            Note: This is no longer maintained and is only here for reference. Please fork if you have improvements" />
+			a, h1, h2, h3, h4
+			{
+				color: #aaaaaa;
+				text-decoration: underline;
+			}
+			.h2
+			{
+				margin-left: 5px;
+			}
+			.h3
+			{
+				margin-left: 15px;
+			}
+			.h4
+			{
+				margin-left: 25px;
+			}
 
-    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+			.section
+			{
+				border: 1px solid #888888;
+				background:#555555;
+				margin: 10px;
+				padding: 5px;
+			}
+			textarea
+			{
+				width: 100%;
+				margin: 2px;
+				padding: 3px;
+				color: white;
+				background: #222222;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>SigScan - Documentation</h1>
+		<ol>
+			<li><a href="#1.about">About / Why you would use it.</a></li>
+			<li><a href="#2.details">Function Details</a><br />
+				<ul>
+					<li><a href="#2.details.initializesigscan">InitializeSigScan</a></li>
+					<li><a href="#2.details.sigscan">SigScan</a></li>
+					<li><a href="#2.details.finalizesigscan">FinalizeSigScan</a></li>
+				</ul>
+			</li>
+			<li><a href="#3.finding">Finding Signatures on your own.</a></li>
+			<li><a href="#4.examples">Examples in multiple languages.</a><br />
+				<ul>
+					<li><a href="#4.examples.cpp">C++</a></li>
+					<li><a href="#4.examples.csharp">C#</a></li>
+					<li><a href="#4.examples.failboat">VB.NET</a></li>
+				</ul>
+			</li>
+			<li><a href="#5.remarks">Remarks - Remember to cleanup.</a></li>
+		</ol>
+		<br />
 
-    <title>SigScan</title>
-  </head>
+		<div class="section">
+			<a name="1.about"> </a>
+			<h2>About / Why you would use it</h2>
+			Author: Aikar@Windower.net<br />
+			Upon joining the windower team one of the first things I learned about was the use of byte signatures
+			to find memory addresses. Cliff originally wrote a function to do it called GetAddress that was very basic.
+			The function required actual byte arrays, so it required more work to 'use', and therefor I decided to write my
+			own implementation with more features and make it faster using better techniques to find the destined address,
+			and now we have SigScan, which I am now providing as a DLL to do scans from a 3rd party exe.
 
-  <body>
+			<br /><br />
+			The most popular form of reading memory from the game is finding the modules base address
+			then using a static offset to the desired memory location. The problem with this is when
+			changes are made to the DLL, most offsets will 'shift' as the new code is put into the binary.
+			Now all of those static offsets are changed and no longer work.
+			<br />
+			<br />
+			However there is a technique called "Byte Signature Scanning" that can help you find
+			your desired memory location without using static memlocs by "scanning" for it. This
+			The idea is to scan over the binaries actual CODE, and look for a specific pattern of
+			code that references your desired memory location that doesnt occur anywhere else in the
+			binary. <br /><br />
 
-    <!-- HEADER -->
-    <div id="header_wrap" class="outer">
-        <header class="inner">
-          <a id="forkme_banner" href="https://github.com/aikar/SigScan">View on GitHub</a>
+			For Example:<br />
+			<textarea readonly="true" rows="7">05AB51D7   8338 60          	CMP DWORD PTR DS:[EAX],60
+05AB51DA   75 0E            	JNZ SHORT FFXiMain.05AB51EA
+05AB51DC   6A 00            	PUSH 0
+05AB51DE   E8 5DFA0C00      	CALL FFXiMain.05B84C40
+05AB51E3   83C4 04          	ADD ESP,4
+05AB51E6   84C0             	TEST AL,AL
+05AB51E8   74 07            	JE SHORT FFXiMain.05AB51F1
+05AB51EA   C605 4C96E105 00 	MOV BYTE PTR DS:[5E1964C],0</textarea><br />
+			The very last line contains my desired Memory Address: 0x4C96E105<br /><br />
+			Every time the game loads, this same exact code will likely still be in the binary
+			(unless the patch changed this specific code), and will be referencing the exact memory
+			location i'm wanting to access.
 
-          <h1 id="project_title">SigScan</h1>
-          <h2 id="project_tagline">Old project used for Final Fantasy XI Windower project. Allows you to use byte signatures to dynamically locate memory addresses during program runtime.                            Note: This is no longer maintained and is only here for reference. Please fork if you have improvements</h2>
+			If you don't understand assembly, its ok, i'll give a brief overview of this data.
+			The first column you can ignore, that was the memory addresses those instructions were at
+			at the time of this paste. The 2nd column is the ACTUAL instructions/code in the binary.
+			The 3rd column is just a textual representation of what those instructions are doing so you can
+			read it easier if you program in assembly. On the last line you can see its moving a value of 0
+			into a byte, and the [5E1964C] is the address its storing to, and thats what I want.
+			On the left hand side you can see that address is in the actual code too (note: hex is stored
+			in reverse order in memory. This is what we are scanning for, the bytes in the middle column,
+			up until the desired memory location (0x4C96E105). So instead of a static address, we can for the
+			code and pull the memory address we want out of that data. From a 3rd party perspecive you can now
+			use ReadProcessMemory on that address, or from an internal perspective, create a pointer to that address.<br />
+			This greatly will increase the likelyhood your application will still work after the module is updated.
+		</div>
+		<div class="section">
+			<a name="2.details"> </a>
+			<h2>Function Details</h2>
+			The SigScan DLL relies on 3 functions to work.
+				<div class="h3">
+					<a name="2.details.initializesigscan"> </a>
+					<h3>InitializeSigScan( DWORD PID, const char* Module)</h3>
+					The first parameter is a 32bit unsigned integer, supplying the Process ID you are
+					wanting to read, and the module to find a memory address in.<br /><br />
+					This function will connect to the process, find the base address, and if the process is a not the current process, copy the entire module to your programs
+					local memory. This is required to achieve high speeds of scanning the memory, as doing it over
+					ReadProcessMemory would be drastically slow.<br /><br />
+				</div>
+				<div class="h3">
+					<a name="2.details.sigscan"> </a>
+					<h3>SigScan(const char* Pattern, int Offset)</h3>
+					This is the primary function of the DLL, that does the actual scanning. You MUST call InitializeSigScan before using this function.
+					It will automatically scan the last Process and Module initialized with InitializeSigScan().
+					This function accepts a string ascii based pattern of bytes. You must supply 2 characters per byte
+					to check for as you normally would define as 0xXX. If its a single 0xF, you need "0f". So the strings length must be divisible by 2,
+					where every 2 characters represents 1 byte.<br /><br />
+					Example: "83C408DFE0F6C4050F8A610100005FC605"<br />
+					This will look for: 0x83 0xC4 0x08 0xDF 0xE0 0xF6 0xC4 0x05 0x0F 0x8A 0x61 0x01 0x00 0x00 0x5F 0xC6 0x05<br />
+					By default, SigScan will use the next 4 bytes AFTER the end of the signature as the memory address you are wanting to find.<br />
+					The Offset field is computed into this predefined location. So in most cases Offset should be 0. However, if you find a signature
+					thats like 36 bytes before your desired memory location, you can set offset to 36 and it will look at 36 bytes AFTER the end of the signature.
+					Offset will primarily be 0 in your scans, but is provided to you so you can use signatures a little more distant from the desired location
+					without creating an insanely long signature or using a ton of wildcards.<br /><br />
 
-            <section id="downloads">
-              <a class="zip_download_link" href="https://github.com/aikar/SigScan/zipball/master">Download this project as a .zip file</a>
-              <a class="tar_download_link" href="https://github.com/aikar/SigScan/tarball/master">Download this project as a tar.gz file</a>
-            </section>
-        </header>
-    </div>
+					There are 2 special characters that can be used in the pattern, one is address specification.
+					As stated, by default the memory address it will return is at the end of the signature. But sometimes you may want to use a few bytes AFTER your
+					desired memory location as part of your signature. If you wish to do this, you can specify WHERE in your signature your desired
+					memory location is at with XXXXXXXX, <br />
+					For example (not a real signature!): "3FBACD300200A1XXXXXXXXB1C4DA"<br />
+					Now the position of the X's declares where the memory address is. Offset should be 0 when using this, as offset will modify the position,
+					and will not returned your desired memory location!!!<br /><br />
+					Any unkown character such as ? and invalid hex characters are treated as wildcards, but still must be matched up in 2's.<br />
+					For example (not a real signature!): "3AB2DFAB????????DEA1FA"<br />
+					Sometimes the middle of your signature may have other unwanted memory addresses in them, and you need to wildcard those out to skip them.
+					Wildcard anything that will potentially be different every time the game opens - that includes ALL memory addresses that you are not trying
+					to retrieve, otherwise your signature will not be valid the next time the game opens and starts at a different base address.
+					<br />
+					This function also has special characters that can be used at the start of the pattern to change how it functions.
+					<ul>
+						<li>##: If the pattern starts with a ## (eg: "##ABCCDDEE"). This resets the default "return area" to the start of the pattern, and returns the start of the pattern itself (NOT THE VALUE OF THOSE 4 BYTES!).
+							This will return the memory address of the first byte in the signature.
+							This is useful for finding actual functions themselves in the module.</li>
+						<li>@@: Similiar to ##, this will return the address to the signature itself, but retails its default position at the end of the signature.
+							This will return the memory address of the next byte after the signature.
+							This is useful for finding actual functions themselves in the module.</li>
+					</ul>
+					Those however will not help much unless you are using a native language with a DLL loaded into the targets process to access those functions.
 
-    <!-- MAIN CONTENT -->
-    <div id="main_content_wrap" class="outer">
-      <section id="main_content" class="inner">
-        <h3>
-<a name="welcome-to-github-pages" class="anchor" href="#welcome-to-github-pages"><span class="octicon octicon-link"></span></a>Welcome to GitHub Pages.</h3>
+				</div>
+				<div class="h3">
+					<a name="2.details.finalizesigscan"> </a>
+					<h3>FinalizeSigScan()</h3>
+					This is a fairly simple function. It simply cleans up the memory used for the scanning when you are done.
+					Always call this when your done scanning a module. Calling InitializeSigScan again will automatically call
+					FinalizeSigScan so if you need to scan multiple modules you do not need to call it until you finish the last.
+				</div>
 
-<p>This automatic page generator is the easiest way to create beautiful pages for all of your projects. Author your page content here using GitHub Flavored Markdown, select a template crafted by a designer, and publish. After your page is generated, you can check out the new branch:</p>
+		</div>
+		<div class="section">
+			<a name="3.finding"> </a>
+			<h2>Finding Signatures on your own</h2>
+		</div>
+		<div class="section">
+			<a name="4.examples"> </a>
+			<h2>Examples in multiple languages</h2>
+			<a name="4.examples.cpp"> </a>
+				<h3>C++</h3>
+			C++ has 2 different versions you can use. One is static library,
+			so you may link the code directly into your program and not require a
+			DLL to distribute with your application. This is recommended for C++ developers.
+			However you may dynamically link still with SigScan.dll if you wish to use it over multiple applications.
+			<h3>Code for Static Linking (Header file sigscan.h or place in your own header file)</h3>
+			<textarea readonly="true" rows="3">DWORD SigScan(const char* szPattern, int offset = 0);
+void InitializeSigScan(DWORD ProcessID, const char* Module);
+void FinalizeSigScan();
+#pragma comment(lib,"SigScanStatic.lib")</textarea><br />
+			<h3>Code for Dynamic Linking (Header file sigscan.h or place in your own header file)</h3>
+			<textarea readonly="true" rows="3">__declspec(dllimport) DWORD SigScan(const char* szPattern, int offset = 0);
+__declspec(dllimport) void InitializeSigScan(DWORD ProcessID, const char* Module);
+__declspec(dllimport) void FinalizeSigScan();
+#pragma comment(lib,"SigScan.lib")</textarea><br />
 
-<pre><code>$ cd your_repo_root/repo_name
-$ git fetch origin
-$ git checkout gh-pages
-</code></pre>
-
-<p>If you're using the GitHub for Mac, simply sync your repository and you'll see the new branch.</p>
-
-<h3>
-<a name="designer-templates" class="anchor" href="#designer-templates"><span class="octicon octicon-link"></span></a>Designer Templates</h3>
-
-<p>We've crafted some handsome templates for you to use. Go ahead and continue to layouts to browse through them. You can easily go back to edit your page before publishing. After publishing your page, you can revisit the page generator and switch to another theme. Your Page content will be preserved if it remained markdown format.</p>
-
-<h3>
-<a name="rather-drive-stick" class="anchor" href="#rather-drive-stick"><span class="octicon octicon-link"></span></a>Rather Drive Stick?</h3>
-
-<p>If you prefer to not use the automatic generator, push a branch named <code>gh-pages</code> to your repository to create a page manually. In addition to supporting regular HTML content, GitHub Pages support Jekyll, a simple, blog aware static site generator written by our own Tom Preston-Werner. Jekyll makes it easy to create site-wide headers and footers without having to copy them across every page. It also offers intelligent blog support and other advanced templating features.</p>
-
-<h3>
-<a name="authors-and-contributors" class="anchor" href="#authors-and-contributors"><span class="octicon octicon-link"></span></a>Authors and Contributors</h3>
-
-<p>You can <a href="https://github.com/blog/821" class="user-mention">@mention</a> a GitHub username to generate a link to their profile. The resulting <code>&lt;a&gt;</code> element will link to the contributor's GitHub Profile. For example: In 2007, Chris Wanstrath (<a href="https://github.com/defunkt" class="user-mention">@defunkt</a>), PJ Hyett (<a href="https://github.com/pjhyett" class="user-mention">@pjhyett</a>), and Tom Preston-Werner (<a href="https://github.com/mojombo" class="user-mention">@mojombo</a>) founded GitHub.</p>
-
-<h3>
-<a name="support-or-contact" class="anchor" href="#support-or-contact"><span class="octicon octicon-link"></span></a>Support or Contact</h3>
-
-<p>Having trouble with Pages? Check out the documentation at <a href="http://help.github.com/pages">http://help.github.com/pages</a> or contact <a href="mailto:support@github.com">support@github.com</a> and we’ll help you sort it out.</p>
-      </section>
-    </div>
-
-    <!-- FOOTER  -->
-    <div id="footer_wrap" class="outer">
-      <footer class="inner">
-        <p class="copyright">SigScan maintained by <a href="https://github.com/aikar">aikar</a></p>
-        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
-      </footer>
-    </div>
-
-    
-
-  </body>
+		Once you have your headers set up, you may utilize the functions as so.<br />
+		<textarea readonly="true" rows="8">DWORD dwPID = 7784;
+HANDLE hProc = OpenProcess(PROCESS_VM_READ,FALSE, dwPID);
+DWORD data = NULL;
+InitializeSigScan(dwPID,"FFXiMain.dll");
+DWORD memloc = ((unsigned int)SigScan("b0015ec390518b4c24088d4424005068",36) + 0xC);
+FinalizeSigScan();
+ReadProcessMemory(hProc,(LPCVOID) memloc,&data,sizeof(data),NULL);
+printf("time: %u\n",data);
+CloseHandle(hProc);</textarea><br/ >
+		<br />
+		<br />
+			<a name="4.examples.csharp"> </a>
+			<h3>C#</h3>
+			One pitfall to .NET is not being able to statically link code, so you will have to import from the DLL and distribute it.<br />
+			First you will need<br />
+			<textarea readonly="true" rows="1">using System.Runtime.InteropServices;</textarea><br />
+			Then you need these imports in your main class<br />
+			<textarea readonly="true" rows="5">[DllImport("SigScan.dll", EntryPoint = "InitializeSigScan")]
+public static extern void InitializeSigScan(uint iPID,[MarshalAs(UnmanagedType.LPStr)] string szModule);
+[DllImport("SigScan.dll", EntryPoint = "SigScan")]
+public static extern UInt32 SigScan([MarshalAs(UnmanagedType.LPStr)] string Pattern, int Offset);
+[DllImport("SigScan.dll", EntryPoint = "FinalizeSigScan")]
+public static extern void FinalizeSigScan();</textarea><br />
+			Then you can use the DLL like so<br />
+			<textarea readonly="true" rows="8">uint iPID = 7784;
+IntPtr hProc = OpenProcess(ProcessAccessFlags.PROCESS_VM_READ, false, iPID);
+InitializeSigScan(iPID,"FFXiMain.dll");
+uint memloc = SigScan("b0015ec390518b4c24088d4424005068", 36) + 0x0C;
+FinalizeSigScan();
+uint Data = 0;
+ReadProcessMemory(hProc, memloc, ref Data, 4, 0);
+CloseHandle(hProc);
+Console.WriteLine(Data);</textarea><br />
+			<a name="4.examples.failboat"> </a>
+			<h3>VB.NET</h3>
+			One pitfall to .NET is not being able to statically link code, so you will have to import from the DLL and distribute it.<br />
+			Note: VB.NET is not a real programming language, and needs to die in a fire. If you're using this, stop learning how to use signatures and learn another language please :(<br />
+			First you will need<br />
+			<textarea readonly="true" rows="1">Imports System.Runtime.InteropServices</textarea><br />
+			Then you need these imports in your main class<br />
+			<textarea readonly="true" rows="2">Declare Sub InitializeSigScan Lib "SigScan.dll" (ByVal PID As UInt32,<MarshalAs(UnmanagedType.LPStr)> ByVal szModule As String)
+Declare Function SigScan Lib "SigScan.dll" (<MarshalAs(UnmanagedType.LPStr)> ByVal Buffer As String, ByVal Offset As Int32) As UInt32
+Declare Sub FinalizeSigScan Lib "SigScan.dll" ()</textarea><br />
+			Then you can use the DLL like so<br />
+			<textarea readonly="true" rows="11">Dim iPID As Integer
+Dim hProc As IntPtr
+Dim memloc As UInt32
+Dim Data As UInt32
+iPID = 7784
+hProc = OpenProcess(PROCESS_ACCESS.PROCESS_VM_READ, False, iPID)
+InitializeSigScan(iPID,"FFXiMain.dll")
+memloc = SigScan("b0015ec390518b4c24088d4424005068", 36) + &HC
+FinalizeSigScan()
+ReadProcessMemory(hProc, memloc, Data, 4, 0)
+CloseHandle(hProc)
+MsgBox(Data)</textarea>
+		</div>
+		<div class="section">
+			<a name="5.remarks"> </a>
+			<h2>Remarks - Remember to cleanup</h2>
+			It's important you remember to call FinalizeSigScan() after finding all the signatures you need to find.
+			If you do not do so, around 2.5mb of memory will be sitting there unused and wasted.
+			You should clean up after you are done and save your users memory!
+			This is automatically done when the DLL is unloaded, so if you do forgot itll clean up properly on application close, but you
+			should do this when you are done always.
+			<br /><br />
+			Also, note that this method of finding memory addresses is not 100% fullproof. If Square Enix changes some of the physical code in the area you built the signature off of... it will break!
+			This does not happen much, but note you may need to repair/find a new signature after a patch one day. Don't expect there to never be problems ever again.
+		</div>
+	</body>
 </html>
