@@ -4,6 +4,11 @@ SigScan
 Old project used for Final Fantasy XI Windower project. Allows you to use byte signatures to dynamically locate memory addresses during program runtime.
 
 
+This is no longer maintained. Please fork to contribute to it.
+
+Readme is a paste of the index.html, it is recommended you view the HTML file at http://aikar.github.io/SigScan
+===========
+
 
 SigScan - Documentation
 
